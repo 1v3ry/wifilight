@@ -379,7 +379,7 @@ if ($a[3] =~ m/(LK35):([^:]+):*(\d+)*/gi)
     }
   }
 
-  return "unknown connection type: choose one of bridge-V3:<ip>|LW12:<ip>|LW12HX:<ip>|LD316:<ip>|LD382:<ip>|SENGLED:<ip>LK35:<ip> " if !(defined($hash->{CONNECTION})); 
+  return "unknown connection type: choose one of bridge-V3:<ip>|LW12:<ip>|LW12HX:<ip>|LD316:<ip>|LD382:<ip>|SENGLED:<ip>|LK35:<ip> " if !(defined($hash->{CONNECTION})); 
 
   Log3 ($hash, 4, "define $a[0] $a[1] $a[2] $a[3]");
 
