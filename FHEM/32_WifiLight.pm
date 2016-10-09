@@ -354,8 +354,32 @@ if ($a[3] =~ m/(SENGLED):([^:]+):*(\d+)*/g)
       $hash->{helper}->{llLock} = 0;
     }
   }
+  
+if ($a[3] =~ m/(LK35):([^:]+):*(\d+)*/gi)
+  {
+    $hash->{CONNECTION} = uc $1;
+    $hash->{IP} = $2;
+    $hash->{PORT} = $3?$3:8899;
+    $hash->{PROTO} = 1;
+    $hash->{SLOT} = 0;
+    @{$hash->{helper}->{hlCmdQueue}} = ();
+    @{$hash->{helper}->{llCmdQueue}} = ();
+    $hash->{helper}->{llLock} = 0;
+    if (!defined($hash->{helper}->{SOCKET}))
+    {
+      my $sock = IO::Socket::INET-> new (
+        PeerPort => $hash->{PORT},
+        PeerAddr => $hash->{IP},
+        Timeout => 1,
+        Blocking => 0,
+        Proto => 'tcp') or Log3 ($hash, 3, "define $hash->{NAME}: can't reach ($@)");
+      my $select = IO::Select->new($sock);
+      $hash->{helper}->{SOCKET} = $sock;
+      $hash->{helper}->{SELECT} = $select;
+    }
+  }
 
-  return "unknown connection type: choose one of bridge-V3:<ip>|LW12:<ip>|LW12HX:<ip>|LD316:<ip>|LD382:<ip>|SENGLED:<ip> " if !(defined($hash->{CONNECTION})); 
+  return "unknown connection type: choose one of bridge-V3:<ip>|LW12:<ip>|LW12HX:<ip>|LD316:<ip>|LD382:<ip>|SENGLED:<ip>LK35:<ip> " if !(defined($hash->{CONNECTION})); 
 
   Log3 ($hash, 4, "define $a[0] $a[1] $a[2] $a[3]");
 
@@ -523,6 +547,34 @@ if ($a[3] =~ m/(SENGLED):([^:]+):*(\d+)*/g)
     return undef;
   }
   
+  if (($hash->{LEDTYPE} eq 'RGBW') && ($hash->{CONNECTION} eq 'LK35'))
+  {
+    $hash->{helper}->{GAMMAMAP} = WifiLight_CreateGammaMapping($hash, 0.65); # TODO CHECK VALUES
+    $hash->{helper}->{COMMANDSET} = "on off dim dimup dimdown RGB RGBW R G B W";
+    $hash->{helper}->{rLevel} = 0;
+    $hash->{helper}->{gLevel} = 0;
+    $hash->{helper}->{bLevel} = 0;
+    $hash->{helper}->{wLevel} = 0;
+	$hash->{helper}->{brightness} = 8;
+    # color cast defaults in r,y, g, c, b, m: +/-30°
+    my $cc = '0, -20, -20, -25, 0, -10'; # TODO CHECK VALUES
+    $attr{$name}{"colorCast"} = $cc;
+    WifiLight_RGB_ColorConverter($hash, split(',', $cc));
+    # white point defaults in r,g,b
+    $attr{$name}{"whitePoint"} = '1, 1, 1';
+	readingsBeginUpdate($hash);
+	readingsBulkUpdate($hash, "brightness", 0);
+	readingsBulkUpdate($hash, "red", 0);
+	readingsBulkUpdate($hash, "green", 0);
+	readingsBulkUpdate($hash, "blue", 0);
+	readingsBulkUpdate($hash, "white", 0);
+	readingsBulkUpdate($hash, "RGB", "000000");
+	readingsBulkUpdate($hash, "RGBW", "00000000");
+	readingsBulkUpdate($hash, "state", "off");
+	readingsEndUpdate($hash, 1);
+    return undef;
+  }
+  
   return "$hash->{LEDTYPE} is not supported at $hash->{CONNECTION} ($hash->{IP})";
 }
 
@@ -612,6 +664,7 @@ WifiLight_Set(@)
     return WifiLight_RGBW1_On($ledDevice, $ramp) if (($ledDevice->{LEDTYPE} eq 'RGBW1') && ($ledDevice->{CONNECTION} =~ 'bridge-V[2|3]'));
     return WifiLight_RGBW2_On($ledDevice, $ramp) if (($ledDevice->{LEDTYPE} eq 'RGBW2') && ($ledDevice->{CONNECTION} eq 'bridge-V3'));
     return WifiLight_White_On($ledDevice, $ramp) if (($ledDevice->{LEDTYPE} eq 'White') && ($ledDevice->{CONNECTION} =~ 'bridge-V[2|3]'));
+	return WifiLight_LK35_On($ledDevice, $ramp) if (($ledDevice->{LEDTYPE} =~ 'RGBW') && ($ledDevice->{CONNECTION} =~ 'LK35'));
   }
 
   if ($cmd eq 'off')
@@ -635,6 +688,7 @@ WifiLight_Set(@)
     return WifiLight_RGBW1_Off($ledDevice, $ramp) if (($ledDevice->{LEDTYPE} eq 'RGBW1') && ($ledDevice->{CONNECTION} =~ 'bridge-V[2|3]'));
     return WifiLight_RGBW2_Off($ledDevice, $ramp) if (($ledDevice->{LEDTYPE} eq 'RGBW2') && ($ledDevice->{CONNECTION} eq 'bridge-V3'));
     return WifiLight_White_Off($ledDevice, $ramp) if (($ledDevice->{LEDTYPE} eq 'White') && ($ledDevice->{CONNECTION} =~ 'bridge-V[2|3]'));
+	return WifiLight_LK35_Off($ledDevice, $ramp) if (($ledDevice->{LEDTYPE} =~ 'RGBW') && ($ledDevice->{CONNECTION} =~ 'LK35'));
   }
 
   if ($cmd eq 'dimup')
@@ -656,6 +710,7 @@ WifiLight_Set(@)
     return WifiLight_RGBW1_Dim($ledDevice, $v, 0, '') if (($ledDevice->{LEDTYPE} eq 'RGBW1') && ($ledDevice->{CONNECTION} =~ 'bridge-V[2|3]'));
     return WifiLight_RGBW2_Dim($ledDevice, $v, 0, '') if (($ledDevice->{LEDTYPE} eq 'RGBW2') && ($ledDevice->{CONNECTION} eq 'bridge-V3'));
     return WifiLight_White_Dim($ledDevice, $v, 0, '') if (($ledDevice->{LEDTYPE} eq 'White') && ($ledDevice->{CONNECTION} =~ 'bridge-V[2|3]'));
+	return WifiLight_LK35_Dim($ledDevice, ReadingsVal($ledDevice->{NAME}, "brightness", 0)+1, 0, '') if (($ledDevice->{LEDTYPE} =~ 'RGBW') && ($ledDevice->{CONNECTION} =~ 'LK35') && ReadingsVal($ledDevice->{NAME}, "brightness", 0) < 8);
   }
 
   if ($cmd eq 'dimdown')
@@ -677,6 +732,7 @@ WifiLight_Set(@)
     return WifiLight_RGBW1_Dim($ledDevice, $v, 0, '') if (($ledDevice->{LEDTYPE} eq 'RGBW1') && ($ledDevice->{CONNECTION} =~ 'bridge-V[2|3]'));
     return WifiLight_RGBW2_Dim($ledDevice, $v, 0, '') if (($ledDevice->{LEDTYPE} eq 'RGBW2') && ($ledDevice->{CONNECTION} eq 'bridge-V3'));
     return WifiLight_White_Dim($ledDevice, $v, 0, '') if (($ledDevice->{LEDTYPE} eq 'White') && ($ledDevice->{CONNECTION} =~ 'bridge-V[2|3]'));
+	return WifiLight_LK35_Dim($ledDevice, ReadingsVal($ledDevice->{NAME}, "brightness", 0)-1, 0, '') if (($ledDevice->{LEDTYPE} =~ 'RGBW') && ($ledDevice->{CONNECTION} =~ 'LK35') && ReadingsVal($ledDevice->{NAME}, "brightness", 0) > 0);
   }
 
   if ($cmd eq 'dim')
@@ -707,11 +763,13 @@ WifiLight_Set(@)
     return WifiLight_RGBW1_Dim($ledDevice, $args[0], $ramp, $flags) if (($ledDevice->{LEDTYPE} eq 'RGBW1') && ($ledDevice->{CONNECTION} =~ 'bridge-V[2|3]'));
     return WifiLight_RGBW2_Dim($ledDevice, $args[0], $ramp, $flags) if (($ledDevice->{LEDTYPE} eq 'RGBW2') && ($ledDevice->{CONNECTION} eq 'bridge-V3'));
     return WifiLight_White_Dim($ledDevice, $args[0], $ramp, $flags) if (($ledDevice->{LEDTYPE} eq 'White') && ($ledDevice->{CONNECTION} =~ 'bridge-V[2|3]'));
+	return WifiLight_LK35_Dim($ledDevice, $args[0], $ramp, $flags) if (($ledDevice->{LEDTYPE} =~ 'RGBW') && ($ledDevice->{CONNECTION} =~ 'LK35'));
   }
 
   if (($cmd eq 'HSV') || ($cmd eq 'RGB') || ($cmd eq 'hue') || ($cmd eq 'redye') || ($cmd eq 'saturation') ||($cmd eq 'tinge'))
   {
     my ($hue, $sat, $val);
+	my ($r, $g, $b);
     
     if ($cmd eq 'HSV')
     {
@@ -724,7 +782,10 @@ WifiLight_Set(@)
     elsif ($cmd eq 'RGB')
     {
       return "RGB is required hex RRGGBB" if (defined($args[0]) && $args[0] !~ /^[0-9A-Fa-f]{6}$/);
-      ($hue, $sat, $val) = WifiLight_RGB2HSV($ledDevice, $args[0]);
+      ($hue, $sat, $val) = WifiLight_RGB2HSV($ledDevice, $args[0]);  
+	  $r = hex substr $args[0], 0, 2;
+	  $g = hex substr $args[0], 2, 2;
+	  $b = hex substr $args[0], 4, 2;
     }
     elsif ($cmd eq 'hue' || $cmd eq 'redye') 
     {
@@ -791,7 +852,39 @@ WifiLight_Set(@)
     WifiLight_HSV_Transition($ledDevice, $hue, $sat, $val, $ramp, $flags, 500, $event) if (($ledDevice->{LEDTYPE} eq 'RGB') && ($ledDevice->{CONNECTION} =~ 'bridge-V[2|3]'));
     WifiLight_HSV_Transition($ledDevice, $hue, $sat, $val, $ramp, $flags, 1000, $event) if (($ledDevice->{LEDTYPE} eq 'RGBW1') && ($ledDevice->{CONNECTION} =~ 'bridge-V[2|3]'));
     WifiLight_HSV_Transition($ledDevice, $hue, $sat, $val, $ramp, $flags, 200, $event) if (($ledDevice->{LEDTYPE} eq 'RGBW2') && ($ledDevice->{CONNECTION} =~ 'bridge-V[2|3]'));
+	WifiLight_LK35_setRGB($ledDevice, $r, $g, $b, $ramp) if (($ledDevice->{LEDTYPE} =~ 'RGBW') && ($ledDevice->{CONNECTION} =~ 'LK35'));
     return WifiLight_SetHSV_Target($ledDevice, $hue, $sat, $val);
+  }
+  
+  if ($cmd eq 'RGBW')
+  {
+    my ($r, $g, $b, $w);
+    return "RGBW is required hex RRGGBBWW" if (defined($args[0]) && $args[0] !~ /^[0-9A-Fa-f]{8}$/);
+    $r = hex substr $args[0], 0, 2;
+    $g = hex substr $args[0], 2, 2;
+    $b = hex substr $args[0], 4, 2;
+    $w = hex substr $args[0], 6, 2;
+    WifiLight_LK35_setRGBW($ledDevice, $r, $g, $b, $w, $ramp) if (($ledDevice->{LEDTYPE} =~ 'RGBW') && ($ledDevice->{CONNECTION} =~ 'LK35'));
+  }
+  
+  if (($cmd eq 'R') || ($cmd eq 'G') || ($cmd eq 'B') || ($cmd eq 'W'))
+  {
+	if (defined($args[1]))
+    {
+      return "usage: set $name CHANNEL value" if ($args[1] !~ /^(\d+)$/);
+      $ramp = $args[1];
+    }
+	
+	my ($color, $value);
+    $color = $cmd;
+	$value = int $args[0];
+	
+	if($value < 0 || $value > 255)
+	{
+		return "value must be a number between 0 and 255";
+	}
+	
+    WifiLight_LK35_setColor($ledDevice, $color, $value) if (($ledDevice->{LEDTYPE} =~ 'RGBW') && ($ledDevice->{CONNECTION} =~ 'LK35'));
   }
 }
 
@@ -2602,6 +2695,211 @@ WifiLight_White_setLevels(@)
   return undef;
 }
 
+###############################################################################
+#
+# device specific controller functions LK35 (Easy RGB(W)-Controller)
+# device Range 0x00 to 0x7F
+#
+#
+###############################################################################
+
+sub
+WifiLight_LK35_On(@)
+{
+  my ($ledDevice, $ramp) = @_;
+  
+  my $delay = 0;
+  my $on = pack('C*', 0x55, 0x00, 0x00, 0x00, 0x02, 0xFF, 0x02, 0x12, 0xAB, 0x00, 0xAA, 0xAA );
+  my $receiver;
+  
+  $on = WifiLight_LK35_Checksum($ledDevice, $on);
+  WifiLight_LowLevelCmdQueue_Add($ledDevice, $on, $receiver, $delay);
+  
+  WifiLight_setLK35_Readings($ledDevice, $ledDevice->{helper}->{rLevel}, $ledDevice->{helper}->{gLevel}, $ledDevice->{helper}->{bLevel}, $ledDevice->{helper}->{wLevel}, $ledDevice->{helper}->{brightness});
+}
+
+sub
+WifiLight_LK35_Off(@)
+{
+  
+  my ($ledDevice, $ramp) = @_;
+  
+  my $delay = 50;
+  my $off = pack('C*', 0x55, 0x00, 0x00, 0x00, 0x02, 0xFF, 0x02, 0x12, 0xA9, 0x00, 0xAA, 0xAA );
+  my $receiver;
+  
+  $off = WifiLight_LK35_Checksum($ledDevice, $off);
+  WifiLight_LowLevelCmdQueue_Add($ledDevice, $off, $receiver, $delay);
+  WifiLight_setLK35_Readings($ledDevice, 0, 0, 0, 0, 0);  
+}
+
+sub
+WifiLight_LK35_Dim(@)
+{
+  my ($ledDevice, $brightness, $ramp) = @_;
+  
+  my $delay = 50;
+  my $dim = pack('C*', 0x55, 0x00, 0x00, 0x00, 0x02, 0xFF, 0x08, 0x23, $brightness, 0x00, 0xAA, 0xAA );
+  my $receiver;
+  
+  $dim = WifiLight_LK35_Checksum($ledDevice, $dim);
+  WifiLight_LowLevelCmdQueue_Add($ledDevice, $dim, $receiver, $delay);
+  $ledDevice->{helper}->{brightness} = $brightness;
+  WifiLight_setLK35_Readings($ledDevice, $ledDevice->{helper}->{rLevel}, $ledDevice->{helper}->{gLevel}, $ledDevice->{helper}->{bLevel}, $ledDevice->{helper}->{wLevel}, $brightness);  
+}
+
+
+
+sub
+WifiLight_LK35_setRGB(@)
+{
+  my ($ledDevice, $r, $g, $b) = @_;
+  my $receiver;
+  my $delay = 0;
+  my $msg = '';
+
+  
+  Log3 ($ledDevice, 4, "$ledDevice->{NAME} LK35 set r:$r, g:$g, b:$b"); 
+  $msg .= WifiLight_LK35_Checksum($ledDevice, pack('C*', 0x55, 0x00, 0x00, 0x00, 0x02, 0xFF, 0x08, 0x18, $r/2, 0x00, 0xAA, 0xAA)); #if ($ledDevice->{helper}->{rLevel} != $r);
+  $msg .= WifiLight_LK35_Checksum($ledDevice, pack('C*', 0x55, 0x00, 0x00, 0x00, 0x02, 0xFF, 0x08, 0x19, $g/2, 0x00, 0xAA, 0xAA)); #if ($ledDevice->{helper}->{gLevel} != $g);
+  $msg .= WifiLight_LK35_Checksum($ledDevice, pack('C*', 0x55, 0x00, 0x00, 0x00, 0x02, 0xFF, 0x08, 0x20, $b/2, 0x00, 0xAA, 0xAA)); #if ($ledDevice->{helper}->{bLevel} != $b);
+
+  $ledDevice->{helper}->{rLevel} = $r;
+  $ledDevice->{helper}->{gLevel} = $g;
+  $ledDevice->{helper}->{bLevel} = $b;  
+
+  WifiLight_setLK35_Readings($ledDevice, $ledDevice->{helper}->{rLevel}, $ledDevice->{helper}->{gLevel}, $ledDevice->{helper}->{bLevel}, $ledDevice->{helper}->{wLevel}, $ledDevice->{helper}->{brightness});
+  
+  
+  # leave here if nothing to tell
+  return unless $msg;
+  
+  # lock ll queue to prevent a bottleneck within llqueue
+  # in cases where the high level queue fills the low level queue (which should not be interrupted) faster then it is processed (send out)
+  # this lock will cause the hlexec intentionally drop frames which can safely be done because there are further frames for processing avialable  
+  $ledDevice->{helper}->{llLock} += 1;  
+  WifiLight_LowLevelCmdQueue_Add($ledDevice, $msg, $receiver, $delay);
+  # unlock ll queue
+  return WifiLight_LowLevelCmdQueue_Add($ledDevice, "\x00", $receiver, 0, 1);
+}
+
+sub
+WifiLight_LK35_setRGBW(@)
+{
+  my ($ledDevice, $r, $g, $b, $w) = @_;
+  my $receiver;
+  my $delay = 0;
+  my $msg = '';
+
+  
+  Log3 ($ledDevice, 4, "$ledDevice->{NAME} LK35 set r:$r, g:$g, b:$b"); 
+  $msg .= WifiLight_LK35_Checksum($ledDevice, pack('C*', 0x55, 0x00, 0x00, 0x00, 0x02, 0xFF, 0x08, 0x18, $r/2, 0x00, 0xAA, 0xAA)); #if ($ledDevice->{helper}->{rLevel} != $r);
+  $msg .= WifiLight_LK35_Checksum($ledDevice, pack('C*', 0x55, 0x00, 0x00, 0x00, 0x02, 0xFF, 0x08, 0x19, $g/2, 0x00, 0xAA, 0xAA)); #if ($ledDevice->{helper}->{gLevel} != $g);
+  $msg .= WifiLight_LK35_Checksum($ledDevice, pack('C*', 0x55, 0x00, 0x00, 0x00, 0x02, 0xFF, 0x08, 0x20, $b/2, 0x00, 0xAA, 0xAA)); #if ($ledDevice->{helper}->{bLevel} != $b);
+  $msg .= WifiLight_LK35_Checksum($ledDevice, pack('C*', 0x55, 0x00, 0x00, 0x00, 0x02, 0xFF, 0x08, 0x21, $w/2, 0x00, 0xAA, 0xAA)); #if ($ledDevice->{helper}->{bLevel} != $b);
+
+  
+  $ledDevice->{helper}->{rLevel} = $r;
+  $ledDevice->{helper}->{gLevel} = $g;
+  $ledDevice->{helper}->{bLevel} = $b;
+  $ledDevice->{helper}->{wLevel} = $w;  
+
+  WifiLight_setLK35_Readings($ledDevice, $ledDevice->{helper}->{rLevel}, $ledDevice->{helper}->{gLevel}, $ledDevice->{helper}->{bLevel}, $ledDevice->{helper}->{wLevel}, $ledDevice->{helper}->{brightness});
+  
+  
+  # leave here if nothing to tell
+  return unless $msg;
+  
+  # lock ll queue to prevent a bottleneck within llqueue
+  # in cases where the high level queue fills the low level queue (which should not be interrupted) faster then it is processed (send out)
+  # this lock will cause the hlexec intentionally drop frames which can safely be done because there are further frames for processing avialable  
+  $ledDevice->{helper}->{llLock} += 1;  
+  WifiLight_LowLevelCmdQueue_Add($ledDevice, $msg, $receiver, $delay);
+  # unlock ll queue
+  return WifiLight_LowLevelCmdQueue_Add($ledDevice, "\x00", $receiver, 0, 1);
+}
+
+sub
+WifiLight_LK35_setColor(@)
+{
+  my ($ledDevice, $color, $value) = @_;
+  my $receiver;
+  my $delay = 0;
+  my $msg = '';
+  my $colorByte = 0x00; 
+  
+  if($color eq "R")
+  {
+	$colorByte = 0x18; 
+	$ledDevice->{helper}->{rLevel} = $value;
+  }
+  elsif($color eq "G")
+  {
+	$colorByte = 0x19; 
+	$ledDevice->{helper}->{gLevel} = $value;
+  }
+  elsif($color eq "B")
+  {
+	$colorByte = 0x20; 
+	$ledDevice->{helper}->{bLevel} = $value;
+  }
+  elsif($color eq "W")
+  {
+	$colorByte = 0x21; 
+	$ledDevice->{helper}->{wLevel} = $value;
+  }
+
+
+  Log3 ($ledDevice, 3, "$ledDevice->{NAME} LK35 set $color:$value"); 
+  $msg = WifiLight_LK35_Checksum($ledDevice, pack('C*', 0x55, 0x00, 0x00, 0x00, 0x02, 0xFF, 0x08, $colorByte, $value/2, 0x00, 0xAA, 0xAA));
+  
+  WifiLight_setLK35_Readings($ledDevice, $ledDevice->{helper}->{rLevel}, $ledDevice->{helper}->{gLevel}, $ledDevice->{helper}->{bLevel}, $ledDevice->{helper}->{wLevel}, $ledDevice->{helper}->{brightness});
+  # leave here if nothing to tell
+  return unless $msg;
+  
+  # lock ll queue to prevent a bottleneck within llqueue
+  # in cases where the high level queue fills the low level queue (which should not be interrupted) faster then it is processed (send out)
+  # this lock will cause the hlexec intentionally drop frames which can safely be done because there are further frames for processing avialable  
+  $ledDevice->{helper}->{llLock} += 1;  
+  WifiLight_LowLevelCmdQueue_Add($ledDevice, $msg, $receiver, $delay);
+  # unlock ll queue
+  return WifiLight_LowLevelCmdQueue_Add($ledDevice, "\x00", $receiver, 0, 1);
+}
+
+sub
+WifiLight_LK35_Checksum(@)
+{
+  my ($ledDevice, $msg) = @_;
+  
+  my @byteStream = unpack('C*', $msg);
+  my $l = @byteStream;
+  my $c = 0;
+  
+  for (my $i=4; $i<($l-3); $i++) {
+    $c += $byteStream[$i];
+  }
+  $c %= 0x100;
+  $byteStream[$l -3]  = $c;
+  $msg = pack('C*', @byteStream);
+  return $msg;
+}
+
+sub
+WifiLight_setLK35_Readings(@)
+{
+  my ($ledDevice, $r, $g, $b, $w, $brightness) = @_;
+  readingsBeginUpdate($ledDevice);
+  readingsBulkUpdate($ledDevice, "red", $r);
+  readingsBulkUpdate($ledDevice, "green", $g);
+  readingsBulkUpdate($ledDevice, "blue", $b);
+  readingsBulkUpdate($ledDevice, "white", $w);
+  readingsBulkUpdate($ledDevice, "brightness", $brightness);
+  readingsBulkUpdate($ledDevice, "RGB", sprintf("%02X%02X%02X",$r,$g,$b));
+  readingsBulkUpdate($ledDevice, "RGBW", sprintf("%02X%02X%02X%02X",$r,$g,$b,$w));
+  readingsBulkUpdate($ledDevice, "state", "on") if ($r+$g+$b+$w+$brightness > 0);
+  readingsBulkUpdate($ledDevice, "state", "off") if (($r+$g+$b+$w == 0) || ($w+$brightness == 0));
+  readingsEndUpdate($ledDevice, 1);
+}
 
 ###############################################################################
 #
